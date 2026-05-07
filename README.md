@@ -12,7 +12,7 @@ batch Hungarian optimizer.
 - Frontend: React + Vite
 - Backend: FastAPI
 - Algorithms: Pure Python, no paid services or API keys
-- Visualization: Local SVG map using latitude/longitude projection
+- Visualization: Leaflet with OpenStreetMap tiles, no API key required
 - Tests: Python standard-library `unittest`
 
 ## Setup
@@ -72,6 +72,14 @@ npm run dev
 ```
 
 The web app runs at `http://127.0.0.1:5173`.
+
+## UI Highlights
+
+- Interactive OpenStreetMap dispatch map with technician, request, and assignment overlays
+- Greedy vs Hungarian side-by-side metrics and winner recommendation
+- Request inspector showing how each algorithm handled the selected job
+- One-click what-if actions for emergency demand, flex capacity, tighter travel radius, and reset
+- Adjustable scoring weights for priority, distance, lateness, and max travel distance
 
 ## Tests
 

@@ -1,36 +1,103 @@
 import {
   Activity,
   AlertCircle,
+  ArrowRight,
+  BriefcaseBusiness,
+  CheckCircle2,
+  CircleGauge,
   Clock3,
-  Gauge,
+  Crosshair,
+  GitCompareArrows,
+  LocateFixed,
   MapPin,
-  Navigation,
+  Plus,
+  RotateCcw,
   Route,
+  ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
+  TriangleAlert,
+  Users,
   Wrench
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  CircleMarker,
+  MapContainer,
+  Polyline,
+  Popup,
+  TileLayer,
+  Tooltip,
+  useMap
+} from "react-leaflet";
 
 const algorithmLabels = {
   greedy: "Greedy",
   hungarian: "Hungarian"
 };
 
+const algorithmTone = {
+  greedy: "#2563eb",
+  hungarian: "#0f766e"
+};
+
 const metricDefinitions = [
-  { key: "fill_rate", label: "Fill rate", type: "percent", icon: Gauge },
-  { key: "priority_served_rate", label: "Priority served", type: "percent", icon: Activity },
-  { key: "total_travel_km", label: "Travel km", type: "number", icon: Route },
-  { key: "objective_score", label: "Objective", type: "number", icon: Navigation }
+  { key: "fill_rate", label: "Fill", type: "percent", icon: CheckCircle2 },
+  { key: "priority_served_rate", label: "Priority", type: "percent", icon: ShieldCheck },
+  { key: "total_travel_km", label: "Travel", type: "number", icon: Route },
+  { key: "objective_score", label: "Objective", type: "number", icon: CircleGauge }
 ];
 
+const scenarioActions = [
+  {
+    id: "emergency",
+    label: "Add P5 Emergency",
+    icon: TriangleAlert,
+    tone: "danger"
+  },
+  {
+    id: "floater",
+    label: "Add Flex Tech",
+    icon: Plus,
+    tone: "success"
+  },
+  {
+    id: "radius",
+    label: "Tighten Radius",
+    icon: Crosshair,
+    tone: "neutral"
+  },
+  {
+    id: "reset",
+    label: "Reset",
+    icon: RotateCcw,
+    tone: "neutral"
+  }
+];
+
+const skillPalette = {
+  controls: "#0f766e",
+  electrical: "#7c3aed",
+  mechanical: "#2563eb",
+  instrumentation: "#b45309",
+  network: "#be123c",
+  hvac: "#0369a1",
+  safety: "#166534"
+};
+
 function formatMetric(value, type) {
-  if (value === undefined || value === null || Number.isNaN(value)) {
-    return "n/a";
-  }
-  if (type === "percent") {
-    return `${Math.round(value * 100)}%`;
-  }
+  if (value === undefined || value === null || Number.isNaN(value)) return "n/a";
+  if (type === "percent") return `${Math.round(value * 100)}%`;
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
+function formatTime(value) {
+  if (!value) return "n/a";
+  return value.slice(11, 16);
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 async function fetchJson(url, options) {
@@ -43,9 +110,11 @@ async function fetchJson(url, options) {
 }
 
 function App() {
+  const originalScenario = useRef(null);
   const [scenario, setScenario] = useState(null);
   const [results, setResults] = useState(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState("hungarian");
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [status, setStatus] = useState("Loading scenario");
   const [isRunning, setIsRunning] = useState(false);
 
@@ -53,7 +122,9 @@ function App() {
     async function load() {
       try {
         const nextScenario = await fetchJson("/api/scenario");
+        originalScenario.current = clone(nextScenario);
         setScenario(nextScenario);
+        setSelectedRequestId(nextScenario.requests[0]?.id ?? null);
         await runComparison(nextScenario);
       } catch (error) {
         setStatus(error.message);
@@ -65,7 +136,7 @@ function App() {
   async function runComparison(nextScenario = scenario) {
     if (!nextScenario) return;
     setIsRunning(true);
-    setStatus("Running allocation");
+    setStatus("Optimizing");
     try {
       const payload = await fetchJson("/api/compare", {
         method: "POST",
@@ -84,23 +155,81 @@ function App() {
   function updateConfig(key, value) {
     setScenario((current) => ({
       ...current,
-      config: {
-        ...current.config,
-        [key]: value
-      }
+      config: { ...current.config, [key]: value }
     }));
+    setStatus("Weights changed");
+  }
+
+  function applyScenario(nextScenario) {
+    setScenario(nextScenario);
+    if (!nextScenario.requests.some((request) => request.id === selectedRequestId)) {
+      setSelectedRequestId(nextScenario.requests[0]?.id ?? null);
+    }
+    runComparison(nextScenario);
+  }
+
+  function handleScenarioAction(actionId) {
+    if (!scenario) return;
+    const next = clone(scenario);
+
+    if (actionId === "reset") {
+      applyScenario(clone(originalScenario.current));
+      setSelectedRequestId(originalScenario.current.requests[0]?.id ?? null);
+      return;
+    }
+
+    if (actionId === "radius") {
+      next.config.max_travel_km = next.config.max_travel_km <= 35 ? 68 : 35;
+      applyScenario(next);
+      return;
+    }
+
+    if (actionId === "floater") {
+      const sequence = next.resources.filter((resource) => resource.id.startsWith("tech-flex")).length + 1;
+      next.resources.push({
+        id: `tech-flex-${sequence}`,
+        name: `Jordan Flex ${sequence}`,
+        location: { lat: 42.0334, lon: -88.0834, label: "Schaumburg" },
+        skills: ["controls", "electrical", "mechanical", "instrumentation", "network"],
+        available_from: "2026-02-02T08:00:00",
+        available_until: "2026-02-02T18:00:00",
+        busy_windows: [],
+        hourly_cost: 126
+      });
+      applyScenario(next);
+      return;
+    }
+
+    if (actionId === "emergency") {
+      const sequence = next.requests.filter((request) => request.id.startsWith("req-emergency")).length + 1;
+      const id = `req-emergency-${sequence}`;
+      next.requests.unshift({
+        id,
+        customer: `Emergency compressor trip ${sequence}`,
+        location: { lat: 42.0416, lon: -87.8874, label: "Des Plaines" },
+        required_skill: "controls",
+        priority: 5,
+        window_start: "2026-02-02T09:30:00",
+        window_end: "2026-02-02T11:00:00",
+        duration_minutes: 80
+      });
+      setSelectedRequestId(id);
+      applyScenario(next);
+    }
   }
 
   const selectedResult = results?.[selectedAlgorithm];
-  const winner = useMemo(() => {
-    if (!results) return null;
-    return Object.values(results).slice().sort((left, right) => {
-      if (right.metrics.priority_served_rate !== left.metrics.priority_served_rate) {
-        return right.metrics.priority_served_rate - left.metrics.priority_served_rate;
-      }
-      return left.metrics.objective_score - right.metrics.objective_score;
-    })[0];
-  }, [results]);
+  const requestById = useMemo(
+    () => new Map((scenario?.requests || []).map((request) => [request.id, request])),
+    [scenario]
+  );
+  const resourceById = useMemo(
+    () => new Map((scenario?.resources || []).map((resource) => [resource.id, resource])),
+    [scenario]
+  );
+  const selectedRequest = requestById.get(selectedRequestId) || scenario?.requests?.[0];
+  const winner = useMemo(() => pickWinner(results), [results]);
+  const comparison = useMemo(() => buildComparison(results), [results]);
 
   if (!scenario) {
     return (
@@ -115,29 +244,45 @@ function App() {
 
   return (
     <main className="shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">Field service dispatch</p>
+      <header className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">Industrial field service dispatch</p>
           <h1>FieldOps Dispatch Lab</h1>
+          <div className="hero-stats" aria-label="Scenario overview">
+            <StatPill icon={Users} label="Technicians" value={scenario.resources.length} />
+            <StatPill icon={BriefcaseBusiness} label="Requests" value={scenario.requests.length} />
+            <StatPill icon={MapPin} label="Region" value="Chicagoland" />
+          </div>
         </div>
-        <button
-          className="primary-action"
-          type="button"
-          onClick={() => runComparison()}
-          disabled={isRunning}
-          title="Run comparison"
-        >
-          <Activity size={18} />
-          {isRunning ? "Running" : "Run comparison"}
-        </button>
+        <div className="hero-actions">
+          <button
+            className="primary-action"
+            type="button"
+            onClick={() => runComparison()}
+            disabled={isRunning}
+            title="Run optimizer"
+          >
+            <Activity size={18} />
+            {isRunning ? "Optimizing" : "Run optimizer"}
+          </button>
+          <div className="status-chip">
+            <Clock3 size={16} />
+            {status}
+          </div>
+        </div>
       </header>
+
+      <section className="impact-grid">
+        <OutcomePanel winner={winner} comparison={comparison} />
+        <ScenarioActions actions={scenarioActions} onAction={handleScenarioAction} />
+      </section>
 
       <section className="dashboard-grid">
         <section className="map-panel" aria-label="Spatial assignment map">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Spatial view</p>
-              <h2>{algorithmLabels[selectedAlgorithm]} assignments</h2>
+              <p className="eyebrow">Live map</p>
+              <h2>{algorithmLabels[selectedAlgorithm]} dispatch plan</h2>
             </div>
             <div className="segmented" aria-label="Algorithm selector">
               {Object.keys(algorithmLabels).map((algorithm) => (
@@ -152,53 +297,28 @@ function App() {
               ))}
             </div>
           </div>
-          <MapView scenario={scenario} result={selectedResult} />
+          <DispatchMap
+            resourceById={resourceById}
+            result={selectedResult}
+            scenario={scenario}
+            selectedRequestId={selectedRequest?.id}
+            setSelectedAlgorithm={setSelectedAlgorithm}
+            setSelectedRequestId={setSelectedRequestId}
+          />
         </section>
 
-        <aside className="control-panel">
-          <div className="panel-heading compact">
-            <div>
-              <p className="eyebrow">Parameters</p>
-              <h2>Scoring weights</h2>
-            </div>
-            <SlidersHorizontal size={20} />
-          </div>
-          <Slider
-            label="Priority"
-            value={scenario.config.priority_weight}
-            min={10}
-            max={80}
-            step={1}
-            onChange={(value) => updateConfig("priority_weight", value)}
+        <aside className="ops-panel">
+          <SelectedRequestPanel
+            request={selectedRequest}
+            resourceById={resourceById}
+            results={results}
           />
-          <Slider
-            label="Distance"
-            value={scenario.config.distance_weight}
-            min={0.25}
-            max={4}
-            step={0.25}
-            onChange={(value) => updateConfig("distance_weight", value)}
+          <ControlsPanel
+            config={scenario.config}
+            isRunning={isRunning}
+            runComparison={() => runComparison()}
+            updateConfig={updateConfig}
           />
-          <Slider
-            label="Lateness"
-            value={scenario.config.lateness_weight}
-            min={0}
-            max={2}
-            step={0.1}
-            onChange={(value) => updateConfig("lateness_weight", value)}
-          />
-          <Slider
-            label="Max km"
-            value={scenario.config.max_travel_km}
-            min={25}
-            max={100}
-            step={1}
-            onChange={(value) => updateConfig("max_travel_km", value)}
-          />
-          <div className="status-row">
-            <Clock3 size={18} />
-            <span>{status}</span>
-          </div>
         </aside>
       </section>
 
@@ -214,14 +334,277 @@ function App() {
       </section>
 
       <section className="details-grid">
-        <AssignmentsPanel
-          title={`${algorithmLabels[selectedAlgorithm]} assignment explanations`}
+        <RequestsPanel
+          requestById={requestById}
+          resourceById={resourceById}
           scenario={scenario}
-          result={selectedResult}
+          selectedRequestId={selectedRequest?.id}
+          selectedResult={selectedResult}
+          setSelectedRequestId={setSelectedRequestId}
         />
-        <RequestsPanel scenario={scenario} result={selectedResult} />
+        <AssignmentsPanel
+          resourceById={resourceById}
+          result={selectedResult}
+          requestById={requestById}
+          selectedAlgorithm={selectedAlgorithm}
+        />
       </section>
     </main>
+  );
+}
+
+function StatPill({ icon: Icon, label, value }) {
+  return (
+    <span className="stat-pill">
+      <Icon size={16} />
+      <b>{value}</b>
+      {label}
+    </span>
+  );
+}
+
+function OutcomePanel({ winner, comparison }) {
+  return (
+    <section className="outcome-panel">
+      <div>
+        <p className="eyebrow">Recommendation</p>
+        <h2>{winner ? `${algorithmLabels[winner.algorithm]} is the stronger plan` : "Waiting for optimizer"}</h2>
+      </div>
+      <div className="outcome-copy">
+        <Sparkles size={22} />
+        <p>
+          {comparison
+            ? `${comparison.priorityText}. ${comparison.travelText}. Objective delta: ${comparison.objectiveDelta}.`
+            : "Run the optimizer to compare dispatch quality."}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function ScenarioActions({ actions, onAction }) {
+  return (
+    <section className="scenario-actions" aria-label="Scenario actions">
+      {actions.map(({ id, label, icon: Icon, tone }) => (
+        <button key={id} className={`scenario-action ${tone}`} type="button" onClick={() => onAction(id)}>
+          <Icon size={18} />
+          <span>{label}</span>
+        </button>
+      ))}
+    </section>
+  );
+}
+
+function DispatchMap({
+  resourceById,
+  result,
+  scenario,
+  selectedRequestId,
+  setSelectedAlgorithm,
+  setSelectedRequestId
+}) {
+  const assignmentByRequest = useMemo(
+    () => new Map((result?.assignments || []).map((item) => [item.request_id, item])),
+    [result]
+  );
+  const bounds = useMemo(() => {
+    const points = [
+      ...scenario.resources.map((resource) => [resource.location.lat, resource.location.lon]),
+      ...scenario.requests.map((request) => [request.location.lat, request.location.lon])
+    ];
+    return points.length ? points : [[41.8781, -87.6298]];
+  }, [scenario.resources, scenario.requests]);
+
+  return (
+    <div className="map-shell">
+      <MapContainer className="dispatch-map" center={[41.8781, -87.6298]} zoom={9} scrollWheelZoom>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <FitBounds bounds={bounds} />
+
+        {(result?.assignments || []).map((assignment) => {
+          const resource = resourceById.get(assignment.resource_id);
+          const request = scenario.requests.find((item) => item.id === assignment.request_id);
+          if (!resource || !request) return null;
+          const isSelected = assignment.request_id === selectedRequestId;
+          return (
+            <Polyline
+              key={`${assignment.resource_id}-${assignment.request_id}`}
+              pathOptions={{
+                color: isSelected ? "#f59e0b" : algorithmTone[result.algorithm],
+                opacity: isSelected ? 0.95 : 0.64,
+                weight: isSelected ? 5 : 3
+              }}
+              positions={[
+                [resource.location.lat, resource.location.lon],
+                [request.location.lat, request.location.lon]
+              ]}
+            >
+              <Tooltip sticky>
+                {resource.name} to {request.customer} · {assignment.travel_km.toFixed(1)} km
+              </Tooltip>
+            </Polyline>
+          );
+        })}
+
+        {scenario.resources.map((resource) => (
+          <CircleMarker
+            key={resource.id}
+            center={[resource.location.lat, resource.location.lon]}
+            pathOptions={{ color: "#ffffff", fillColor: "#2563eb", fillOpacity: 0.95, weight: 2 }}
+            radius={9}
+          >
+            <Popup>
+              <MapPopupTitle title={resource.name} subtitle={resource.location.label} />
+              <p className="popup-text">{resource.skills.join(", ")}</p>
+            </Popup>
+            <Tooltip direction="top">{resource.name}</Tooltip>
+          </CircleMarker>
+        ))}
+
+        {scenario.requests.map((request) => {
+          const isAssigned = assignmentByRequest.has(request.id);
+          const isSelected = request.id === selectedRequestId;
+          return (
+            <CircleMarker
+              key={request.id}
+              center={[request.location.lat, request.location.lon]}
+              eventHandlers={{ click: () => setSelectedRequestId(request.id) }}
+              pathOptions={{
+                color: isSelected ? "#111827" : "#ffffff",
+                fillColor: isAssigned ? skillPalette[request.required_skill] || "#f97316" : "#dc2626",
+                fillOpacity: 0.95,
+                weight: isSelected ? 3 : 2
+              }}
+              radius={isSelected ? 12 : 9}
+            >
+              <Popup>
+                <MapPopupTitle title={request.customer} subtitle={`P${request.priority} · ${request.required_skill}`} />
+                <p className="popup-text">
+                  {request.location.label} · {request.duration_minutes} min · {timeWindow(request)}
+                </p>
+                <button
+                  className="popup-button"
+                  type="button"
+                  onClick={() => {
+                    setSelectedAlgorithm(result?.algorithm || "hungarian");
+                    setSelectedRequestId(request.id);
+                  }}
+                >
+                  Inspect request
+                </button>
+              </Popup>
+              <Tooltip direction="top">{request.customer}</Tooltip>
+            </CircleMarker>
+          );
+        })}
+      </MapContainer>
+      <div className="map-legend">
+        <span><i className="legend-tech" /> Technicians</span>
+        <span><i className="legend-assigned" /> Assigned requests</span>
+        <span><i className="legend-open" /> Open requests</span>
+      </div>
+    </div>
+  );
+}
+
+function FitBounds({ bounds }) {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds.length > 1) {
+      map.fitBounds(bounds, { padding: [34, 34] });
+    }
+  }, [bounds, map]);
+  return null;
+}
+
+function MapPopupTitle({ title, subtitle }) {
+  return (
+    <div className="popup-title">
+      <strong>{title}</strong>
+      <span>{subtitle}</span>
+    </div>
+  );
+}
+
+function SelectedRequestPanel({ request, resourceById, results }) {
+  const assignments = Object.entries(results || {}).map(([algorithm, result]) => ({
+    algorithm,
+    assignment: result.assignments.find((item) => item.request_id === request?.id),
+    unassigned: result.unassigned.find((item) => item.request_id === request?.id)
+  }));
+
+  if (!request) return null;
+
+  return (
+    <section className="side-section">
+      <div className="panel-heading compact">
+        <div>
+          <p className="eyebrow">Selected request</p>
+          <h2>{request.customer}</h2>
+        </div>
+        <LocateFixed size={20} />
+      </div>
+      <div className="request-inspector">
+        <div className="inspector-grid">
+          <InfoTile label="Priority" value={`P${request.priority}`} />
+          <InfoTile label="Skill" value={request.required_skill} />
+          <InfoTile label="Window" value={timeWindow(request)} />
+          <InfoTile label="Duration" value={`${request.duration_minutes} min`} />
+        </div>
+        <div className="algorithm-decisions">
+          {assignments.map(({ algorithm, assignment, unassigned }) => {
+            const resource = assignment ? resourceById.get(assignment.resource_id) : null;
+            return (
+              <article key={algorithm} className="decision-card">
+                <strong style={{ color: algorithmTone[algorithm] }}>{algorithmLabels[algorithm]}</strong>
+                {assignment ? (
+                  <span>
+                    {resource?.name} <ArrowRight size={13} /> {assignment.travel_km.toFixed(1)} km at{" "}
+                    {formatTime(assignment.start_time)}
+                  </span>
+                ) : (
+                  <span className="decision-open">{unassigned?.reason || "Unassigned"}</span>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function InfoTile({ label, value }) {
+  return (
+    <div className="info-tile">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ControlsPanel({ config, isRunning, runComparison, updateConfig }) {
+  return (
+    <section className="side-section">
+      <div className="panel-heading compact">
+        <div>
+          <p className="eyebrow">Model controls</p>
+          <h2>Scoring weights</h2>
+        </div>
+        <SlidersHorizontal size={20} />
+      </div>
+      <Slider label="Priority" value={config.priority_weight} min={10} max={80} step={1} onChange={(value) => updateConfig("priority_weight", value)} />
+      <Slider label="Distance" value={config.distance_weight} min={0.25} max={4} step={0.25} onChange={(value) => updateConfig("distance_weight", value)} />
+      <Slider label="Lateness" value={config.lateness_weight} min={0} max={2} step={0.1} onChange={(value) => updateConfig("lateness_weight", value)} />
+      <Slider label="Max km" value={config.max_travel_km} min={25} max={100} step={1} onChange={(value) => updateConfig("max_travel_km", value)} />
+      <button className="secondary-action full" type="button" onClick={runComparison} disabled={isRunning}>
+        <GitCompareArrows size={17} />
+        Re-run comparison
+      </button>
+    </section>
   );
 }
 
@@ -264,122 +647,70 @@ function AlgorithmSummary({ algorithm, result, isWinner }) {
   );
 }
 
-function MapView({ scenario, result }) {
-  const assignmentByRequest = useMemo(() => {
-    return new Map((result?.assignments || []).map((item) => [item.request_id, item]));
-  }, [result]);
-
-  const resourceById = useMemo(() => {
-    return new Map(scenario.resources.map((resource) => [resource.id, resource]));
-  }, [scenario.resources]);
-
-  const points = [
-    ...scenario.resources.map((resource) => resource.location),
-    ...scenario.requests.map((request) => request.location)
-  ];
-  const bounds = getBounds(points);
-  const project = (location) => projectPoint(location, bounds);
-
-  return (
-    <div className="map-shell">
-      <svg className="dispatch-map" viewBox="0 0 1000 620" role="img">
-        <defs>
-          <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse">
-            <path d="M 52 0 L 0 0 0 52" fill="none" stroke="#d9e2ec" strokeWidth="1" />
-          </pattern>
-        </defs>
-        <rect width="1000" height="620" fill="#f8fafc" />
-        <rect width="1000" height="620" fill="url(#grid)" opacity="0.75" />
-
-        {(result?.assignments || []).map((assignment) => {
-          const resource = resourceById.get(assignment.resource_id);
-          const request = scenario.requests.find((item) => item.id === assignment.request_id);
-          if (!resource || !request) return null;
-          const start = project(resource.location);
-          const end = project(request.location);
-          return (
-            <g key={`${assignment.resource_id}-${assignment.request_id}`}>
-              <line
-                className="assignment-line"
-                x1={start.x}
-                y1={start.y}
-                x2={end.x}
-                y2={end.y}
-              />
-              <circle className="line-dot" cx={(start.x + end.x) / 2} cy={(start.y + end.y) / 2} r="4" />
-            </g>
-          );
-        })}
-
-        {scenario.resources.map((resource) => {
-          const point = project(resource.location);
-          return (
-            <g className="resource-marker" key={resource.id} transform={`translate(${point.x} ${point.y})`}>
-              <circle r="14" />
-              <text y="5">{resource.name.split(" ")[0][0]}</text>
-              <title>{`${resource.name}: ${resource.skills.join(", ")}`}</title>
-            </g>
-          );
-        })}
-
-        {scenario.requests.map((request) => {
-          const point = project(request.location);
-          const isAssigned = assignmentByRequest.has(request.id);
-          return (
-            <g
-              className={`request-marker ${isAssigned ? "assigned" : "unassigned"}`}
-              key={request.id}
-              transform={`translate(${point.x} ${point.y})`}
-            >
-              <rect x="-11" y="-11" width="22" height="22" rx="4" />
-              <text y="5">{request.priority}</text>
-              <title>{`${request.customer}: priority ${request.priority}`}</title>
-            </g>
-          );
-        })}
-      </svg>
-      <div className="map-legend">
-        <span><i className="legend-resource" /> Technicians</span>
-        <span><i className="legend-request" /> Assigned requests</span>
-        <span><i className="legend-unassigned" /> Unassigned requests</span>
-      </div>
-    </div>
-  );
-}
-
-function getBounds(points) {
-  const lats = points.map((point) => point.lat);
-  const lons = points.map((point) => point.lon);
-  return {
-    minLat: Math.min(...lats),
-    maxLat: Math.max(...lats),
-    minLon: Math.min(...lons),
-    maxLon: Math.max(...lons)
-  };
-}
-
-function projectPoint(location, bounds) {
-  const pad = 70;
-  const width = 1000 - pad * 2;
-  const height = 620 - pad * 2;
-  const lonSpan = Math.max(0.001, bounds.maxLon - bounds.minLon);
-  const latSpan = Math.max(0.001, bounds.maxLat - bounds.minLat);
-  return {
-    x: pad + ((location.lon - bounds.minLon) / lonSpan) * width,
-    y: pad + ((bounds.maxLat - location.lat) / latSpan) * height
-  };
-}
-
-function AssignmentsPanel({ title, scenario, result }) {
-  const resourceById = new Map(scenario.resources.map((resource) => [resource.id, resource]));
-  const requestById = new Map(scenario.requests.map((request) => [request.id, request]));
+function RequestsPanel({
+  requestById,
+  resourceById,
+  scenario,
+  selectedRequestId,
+  selectedResult,
+  setSelectedRequestId
+}) {
+  const assignmentByRequest = new Map((selectedResult?.assignments || []).map((item) => [item.request_id, item]));
+  const unassignedByRequest = new Map((selectedResult?.unassigned || []).map((item) => [item.request_id, item.reason]));
+  const sortedRequests = scenario.requests.slice().sort((left, right) => {
+    if (right.priority !== left.priority) return right.priority - left.priority;
+    return left.window_start.localeCompare(right.window_start);
+  });
 
   return (
     <section className="list-panel">
       <div className="panel-heading compact">
         <div>
+          <p className="eyebrow">Demand queue</p>
+          <h2>{algorithmLabels[selectedResult?.algorithm || "hungarian"]} request coverage</h2>
+        </div>
+        <AlertCircle size={19} />
+      </div>
+      <div className="request-table">
+        {sortedRequests.map((request) => {
+          const assignment = assignmentByRequest.get(request.id);
+          const resource = assignment ? resourceById.get(assignment.resource_id) : null;
+          return (
+            <button
+              className={`request-row ${selectedRequestId === request.id ? "selected" : ""}`}
+              key={request.id}
+              type="button"
+              onClick={() => setSelectedRequestId(request.id)}
+            >
+              <div>
+                <strong>{request.customer}</strong>
+                <span>
+                  P{request.priority} · {request.required_skill} · {request.location.label}
+                </span>
+              </div>
+              <span className={assignment ? "state-pill assigned" : "state-pill open"}>
+                {assignment ? "Assigned" : "Open"}
+              </span>
+              <p>
+                {assignment
+                  ? `${resource?.name} at ${formatTime(assignment.start_time)} · ${assignment.travel_km.toFixed(1)} km`
+                  : unassignedByRequest.get(request.id)}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function AssignmentsPanel({ resourceById, result, requestById, selectedAlgorithm }) {
+  return (
+    <section className="list-panel">
+      <div className="panel-heading compact">
+        <div>
           <p className="eyebrow">Decision log</p>
-          <h2>{title}</h2>
+          <h2>{algorithmLabels[selectedAlgorithm]} assignment rationale</h2>
         </div>
         <MapPin size={19} />
       </div>
@@ -391,7 +722,9 @@ function AssignmentsPanel({ title, scenario, result }) {
             <article className="assignment-row" key={`${assignment.resource_id}-${assignment.request_id}`}>
               <div>
                 <strong>{request?.customer}</strong>
-                <span>{resource?.name} at {assignment.start_time.slice(11)}</span>
+                <span>
+                  {resource?.name} · {formatTime(assignment.start_time)}-{formatTime(assignment.end_time)}
+                </span>
               </div>
               <p>{assignment.explanation}</p>
             </article>
@@ -402,37 +735,40 @@ function AssignmentsPanel({ title, scenario, result }) {
   );
 }
 
-function RequestsPanel({ scenario, result }) {
-  const assignedIds = new Set((result?.assignments || []).map((item) => item.request_id));
-  const unassignedReasonById = new Map((result?.unassigned || []).map((item) => [item.request_id, item.reason]));
+function pickWinner(results) {
+  if (!results) return null;
+  return Object.values(results).slice().sort((left, right) => {
+    if (right.metrics.priority_served_rate !== left.metrics.priority_served_rate) {
+      return right.metrics.priority_served_rate - left.metrics.priority_served_rate;
+    }
+    return left.metrics.objective_score - right.metrics.objective_score;
+  })[0];
+}
 
-  return (
-    <section className="list-panel">
-      <div className="panel-heading compact">
-        <div>
-          <p className="eyebrow">Demand queue</p>
-          <h2>Requests</h2>
-        </div>
-        <AlertCircle size={19} />
-      </div>
-      <div className="request-table">
-        {scenario.requests.map((request) => (
-          <article className="request-row" key={request.id}>
-            <div>
-              <strong>{request.customer}</strong>
-              <span>{request.required_skill} | priority {request.priority}</span>
-            </div>
-            <span className={assignedIds.has(request.id) ? "state-pill assigned" : "state-pill open"}>
-              {assignedIds.has(request.id) ? "Assigned" : "Open"}
-            </span>
-            {!assignedIds.has(request.id) ? (
-              <p>{unassignedReasonById.get(request.id)}</p>
-            ) : null}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
+function buildComparison(results) {
+  if (!results?.greedy || !results?.hungarian) return null;
+  const greedy = results.greedy.metrics;
+  const hungarian = results.hungarian.metrics;
+  const priorityDelta = Math.round((hungarian.priority_served_rate - greedy.priority_served_rate) * 100);
+  const travelDelta = hungarian.total_travel_km - greedy.total_travel_km;
+  const objectiveDelta = hungarian.objective_score - greedy.objective_score;
+
+  return {
+    priorityText:
+      priorityDelta === 0
+        ? "Both plans serve the same weighted priority"
+        : `Hungarian serves ${Math.abs(priorityDelta)} pts ${priorityDelta > 0 ? "more" : "less"} weighted priority`,
+    travelText:
+      Math.abs(travelDelta) < 0.1
+        ? "Travel is effectively tied"
+        : `Hungarian travels ${Math.abs(travelDelta).toFixed(1)} km ${travelDelta > 0 ? "more" : "less"}`,
+    objectiveDelta: `${objectiveDelta > 0 ? "+" : ""}${objectiveDelta.toFixed(1)}`
+  };
+}
+
+function timeWindow(request) {
+  return `${formatTime(request.window_start)}-${formatTime(request.window_end)}`;
 }
 
 export default App;
+
