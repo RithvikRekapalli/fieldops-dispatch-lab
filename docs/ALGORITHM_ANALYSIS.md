@@ -61,7 +61,8 @@ The next production-grade improvements would be:
 - Multi-job technician routes with time-dependent travel.
 - Skill proficiency levels instead of binary skills.
 - SLA breach penalties and customer-specific priorities.
-- Scenario import/export.
 - A rolling-horizon solver that combines real-time greedy decisions with periodic batch
   re-optimization.
 
+The current UI already includes scenario import/export so reviewers can replay what-if cases
+without editing source files.

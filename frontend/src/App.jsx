@@ -7,6 +7,8 @@ import {
   CircleGauge,
   Clock3,
   Crosshair,
+  Download,
+  FileJson,
   GitCompareArrows,
   LocateFixed,
   MapPin,
@@ -17,7 +19,9 @@ import {
   SlidersHorizontal,
   Sparkles,
   TriangleAlert,
+  Upload,
   Users,
+  WifiOff,
   Wrench
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -100,6 +104,28 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function downloadJson(payload, filename) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json"
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function isScenarioPayload(payload) {
+  return (
+    payload &&
+    Array.isArray(payload.resources) &&
+    Array.isArray(payload.requests) &&
+    payload.config &&
+    typeof payload.config === "object"
+  );
+}
+
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
   if (!response.ok) {
@@ -111,12 +137,14 @@ async function fetchJson(url, options) {
 
 function App() {
   const originalScenario = useRef(null);
+  const importInputRef = useRef(null);
   const [scenario, setScenario] = useState(null);
   const [results, setResults] = useState(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState("hungarian");
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [status, setStatus] = useState("Loading scenario");
   const [isRunning, setIsRunning] = useState(false);
+  const [mapTilesOk, setMapTilesOk] = useState(true);
 
   useEffect(() => {
     async function load() {
@@ -218,6 +246,51 @@ function App() {
     }
   }
 
+  function exportScenario() {
+    downloadJson(scenario, "fieldops-scenario.json");
+    setStatus("Scenario exported");
+  }
+
+  function exportResults() {
+    downloadJson(
+      {
+        exported_at: new Date().toISOString(),
+        scenario,
+        results
+      },
+      "fieldops-allocation-results.json"
+    );
+    setStatus("Results exported");
+  }
+
+  function openScenarioImport() {
+    importInputRef.current?.click();
+  }
+
+  function importScenario(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(String(reader.result));
+        if (!isScenarioPayload(payload)) {
+          throw new Error("Scenario must include resources, requests, and config.");
+        }
+        originalScenario.current = clone(payload);
+        setSelectedRequestId(payload.requests[0]?.id ?? null);
+        applyScenario(payload);
+        setStatus(`Imported ${file.name}`);
+      } catch (error) {
+        setStatus(error.message);
+      } finally {
+        event.target.value = "";
+      }
+    };
+    reader.readAsText(file);
+  }
+
   const selectedResult = results?.[selectedAlgorithm];
   const requestById = useMemo(
     () => new Map((scenario?.requests || []).map((request) => [request.id, request])),
@@ -244,6 +317,13 @@ function App() {
 
   return (
     <main className="shell">
+      <input
+        ref={importInputRef}
+        accept="application/json"
+        className="visually-hidden"
+        onChange={importScenario}
+        type="file"
+      />
       <header className="hero">
         <div className="hero-copy">
           <p className="eyebrow">Industrial field service dispatch</p>
@@ -274,7 +354,14 @@ function App() {
 
       <section className="impact-grid">
         <OutcomePanel winner={winner} comparison={comparison} />
-        <ScenarioActions actions={scenarioActions} onAction={handleScenarioAction} />
+        <ScenarioActions
+          actions={scenarioActions}
+          canExportResults={Boolean(results)}
+          onAction={handleScenarioAction}
+          onExportResults={exportResults}
+          onExportScenario={exportScenario}
+          onImportScenario={openScenarioImport}
+        />
       </section>
 
       <section className="dashboard-grid">
@@ -304,6 +391,8 @@ function App() {
             selectedRequestId={selectedRequest?.id}
             setSelectedAlgorithm={setSelectedAlgorithm}
             setSelectedRequestId={setSelectedRequestId}
+            mapTilesOk={mapTilesOk}
+            setMapTilesOk={setMapTilesOk}
           />
         </section>
 
@@ -382,7 +471,14 @@ function OutcomePanel({ winner, comparison }) {
   );
 }
 
-function ScenarioActions({ actions, onAction }) {
+function ScenarioActions({
+  actions,
+  canExportResults,
+  onAction,
+  onExportResults,
+  onExportScenario,
+  onImportScenario
+}) {
   return (
     <section className="scenario-actions" aria-label="Scenario actions">
       {actions.map(({ id, label, icon: Icon, tone }) => (
@@ -391,6 +487,18 @@ function ScenarioActions({ actions, onAction }) {
           <span>{label}</span>
         </button>
       ))}
+      <button className="scenario-action utility" type="button" onClick={onImportScenario}>
+        <Upload size={18} />
+        <span>Import Scenario</span>
+      </button>
+      <button className="scenario-action utility" type="button" onClick={onExportScenario}>
+        <FileJson size={18} />
+        <span>Export Scenario</span>
+      </button>
+      <button className="scenario-action utility wide" disabled={!canExportResults} type="button" onClick={onExportResults}>
+        <Download size={18} />
+        <span>Export Results</span>
+      </button>
     </section>
   );
 }
@@ -401,7 +509,9 @@ function DispatchMap({
   scenario,
   selectedRequestId,
   setSelectedAlgorithm,
-  setSelectedRequestId
+  setSelectedRequestId,
+  mapTilesOk,
+  setMapTilesOk
 }) {
   const assignmentByRequest = useMemo(
     () => new Map((result?.assignments || []).map((item) => [item.request_id, item])),
@@ -417,9 +527,19 @@ function DispatchMap({
 
   return (
     <div className="map-shell">
+      {!mapTilesOk ? (
+        <div className="map-warning">
+          <WifiOff size={17} />
+          Map tiles are unavailable. Markers and assignment routes still work.
+        </div>
+      ) : null}
       <MapContainer className="dispatch-map" center={[41.8781, -87.6298]} zoom={9} scrollWheelZoom>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          eventHandlers={{
+            tileerror: () => setMapTilesOk(false),
+            tileload: () => setMapTilesOk(true)
+          }}
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <FitBounds bounds={bounds} />
@@ -771,4 +891,3 @@ function timeWindow(request) {
 }
 
 export default App;
-

@@ -54,6 +54,7 @@ The Compose stack runs:
 - Frontend: nginx serving the built React app on `localhost:5173`
 - Backend: FastAPI on `localhost:8000`
 - API proxy: frontend requests to `/api/*` are routed to the backend container
+- Health checks for both services
 
 Stop the stack with:
 
@@ -69,6 +70,14 @@ docker compose run --rm backend python -m unittest discover tests
 
 If your machine uses the older standalone Compose binary, use `docker-compose` in place of
 `docker compose`.
+
+Convenience Make targets are also available:
+
+```bash
+make docker-up      # docker compose up --build
+make docker-test    # run backend tests in the backend container
+make docker-down    # stop containers
+```
 
 ### Local Development
 
@@ -102,6 +111,8 @@ The web app runs at `http://127.0.0.1:5173`.
 - Request inspector showing how each algorithm handled the selected job
 - One-click what-if actions for emergency demand, flex capacity, tighter travel radius, and reset
 - Adjustable scoring weights for priority, distance, lateness, and max travel distance
+- Scenario import/export and allocation results export as JSON
+- Offline-safe map behavior: if OpenStreetMap tiles cannot load, markers and routes still render
 
 ## Reviewer Walkthrough
 
@@ -118,7 +129,10 @@ After opening `http://localhost:5173`:
    - `Add Flex Tech` adds a multi-skilled technician.
    - `Tighten Radius` stresses the max-distance hard constraint.
    - `Reset` returns to the baseline scenario.
-5. Change scoring weights and click `Re-run comparison` to see how the optimizer responds.
+5. Export the current scenario or allocation results as JSON to review the exact optimizer input
+   and output.
+6. Import a previously exported scenario JSON to replay a what-if case.
+7. Change scoring weights and click `Re-run comparison` to see how the optimizer responds.
 
 The most important comparison to notice: greedy often preserves lower travel, while Hungarian
 can accept additional travel to protect scarce capability and serve more weighted priority.
@@ -188,4 +202,5 @@ frontend/nginx.conf   Static server and API proxy
 docs/
   ALGORITHM_ANALYSIS.md
 docker-compose.yml    One-command app startup
+Makefile              Convenience commands for Docker and tests
 ```

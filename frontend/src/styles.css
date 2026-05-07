@@ -48,6 +48,16 @@ button:disabled {
   place-items: center;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
 .loading-panel {
   display: flex;
   align-items: center;
@@ -245,6 +255,15 @@ h2 {
   border-color: #bbf7d0;
 }
 
+.scenario-action.utility {
+  color: #344054;
+  background: #f8fafc;
+}
+
+.scenario-action.wide {
+  grid-column: 1 / -1;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 390px;
@@ -307,7 +326,28 @@ h2 {
 }
 
 .map-shell {
+  position: relative;
   padding: 0 14px 14px;
+}
+
+.map-warning {
+  position: absolute;
+  z-index: 600;
+  top: 12px;
+  left: 26px;
+  right: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  color: #7c2d12;
+  background: #fff7ed;
+  font-size: 0.86rem;
+  font-weight: 820;
+  box-shadow: 0 10px 24px rgba(124, 45, 18, 0.12);
 }
 
 .dispatch-map {
@@ -701,4 +741,3 @@ h2 {
     justify-self: start;
   }
 }
-
