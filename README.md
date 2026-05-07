@@ -1,19 +1,41 @@
 # FieldOps Dispatch Lab
 
-A local full-stack field service dispatch app for comparing resource allocation strategies.
+A Dockerized full-stack field service dispatch app for comparing resource allocation
+strategies.
 
 The scenario models industrial maintenance technicians, incoming service requests, skill
 requirements, availability windows, busy windows, travel distance, priority, and service cost.
-The UI visualizes assignments on an SVG spatial map and compares greedy dispatch against a
-batch Hungarian optimizer.
+The UI visualizes assignments on an interactive OpenStreetMap view and compares greedy
+dispatch against a batch Hungarian optimizer.
+
+The project is designed to run on a reviewer machine with one Docker command. No paid
+services, API keys, or hosted databases are required.
 
 ## Tech Stack
 
-- Frontend: React + Vite
+- Frontend: React + Vite, Leaflet, React Leaflet, lucide-react
 - Backend: FastAPI
+- Runtime: Docker Compose with nginx serving the frontend and proxying `/api` to FastAPI
 - Algorithms: Pure Python, no paid services or API keys
 - Visualization: Leaflet with OpenStreetMap tiles, no API key required
 - Tests: Python standard-library `unittest`
+
+## Requirements
+
+Recommended:
+
+- Docker Desktop or Docker Engine
+- Docker Compose v2, available as `docker compose`
+
+Optional local development tools:
+
+- Python 3.10+
+- Node.js 22+
+- npm
+
+Python backend dependencies are listed in [requirements.txt](requirements.txt). Frontend
+dependencies are listed in [frontend/package.json](frontend/package.json) and locked in
+[frontend/package-lock.json](frontend/package-lock.json).
 
 ## Setup
 
@@ -80,6 +102,26 @@ The web app runs at `http://127.0.0.1:5173`.
 - Request inspector showing how each algorithm handled the selected job
 - One-click what-if actions for emergency demand, flex capacity, tighter travel radius, and reset
 - Adjustable scoring weights for priority, distance, lateness, and max travel distance
+
+## Reviewer Walkthrough
+
+After opening `http://localhost:5173`:
+
+1. Compare the recommendation panel at the top. It summarizes whether greedy or Hungarian is
+   currently the stronger plan.
+2. Switch between `Greedy` and `Hungarian` above the map. The assignment routes and request
+   coverage update for the selected algorithm.
+3. Click a request marker or a row in the demand queue. The selected request panel shows how
+   each algorithm handled that job.
+4. Use the what-if actions:
+   - `Add P5 Emergency` introduces urgent demand.
+   - `Add Flex Tech` adds a multi-skilled technician.
+   - `Tighten Radius` stresses the max-distance hard constraint.
+   - `Reset` returns to the baseline scenario.
+5. Change scoring weights and click `Re-run comparison` to see how the optimizer responds.
+
+The most important comparison to notice: greedy often preserves lower travel, while Hungarian
+can accept additional travel to protect scarce capability and serve more weighted priority.
 
 ## Tests
 
