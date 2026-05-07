@@ -17,6 +17,39 @@ batch Hungarian optimizer.
 
 ## Setup
 
+### Docker
+
+Recommended for reviewers:
+
+```bash
+docker compose up --build
+```
+
+Then open `http://localhost:5173`.
+
+The Compose stack runs:
+
+- Frontend: nginx serving the built React app on `localhost:5173`
+- Backend: FastAPI on `localhost:8000`
+- API proxy: frontend requests to `/api/*` are routed to the backend container
+
+Stop the stack with:
+
+```bash
+docker compose down
+```
+
+Run backend tests inside Docker:
+
+```bash
+docker compose run --rm backend python -m unittest discover tests
+```
+
+If your machine uses the older standalone Compose binary, use `docker-compose` in place of
+`docker compose`.
+
+### Local Development
+
 ### Backend
 
 ```bash
@@ -96,9 +129,13 @@ backend/app/
   sample_data.py     Deterministic demo scenario
 backend/tests/
   test_allocation.py Constraint and comparison tests
+backend/Dockerfile    Backend container
 frontend/src/
   App.jsx            React dashboard
   styles.css         UI styling
+frontend/Dockerfile   Frontend container
+frontend/nginx.conf   Static server and API proxy
 docs/
   ALGORITHM_ANALYSIS.md
+docker-compose.yml    One-command app startup
 ```
